@@ -638,8 +638,15 @@ const App: React.FC = () => {
     if (draggingLineGrid && gridEditorImageRef.current) {
       const rect = gridEditorImageRef.current.getBoundingClientRect();
       
+      // トリミング領域の境界を計算
+      const trimmedLeft = rect.left + rect.width * trim.left;
+      const trimmedTop = rect.top + rect.height * trim.top;
+      const trimmedWidth = rect.width * (1 - trim.left - trim.right);
+      const trimmedHeight = rect.height * (1 - trim.top - trim.bottom);
+      
       if (draggingLineGrid.type === 'col') {
-        const x = (e.clientX - rect.left) / rect.width;
+        // トリミング領域内での相対位置を計算
+        const x = (e.clientX - trimmedLeft) / trimmedWidth;
         const clampedX = Math.max(0.02, Math.min(0.98, x));
         
         setColLines(prev => {
@@ -651,7 +658,8 @@ const App: React.FC = () => {
           return newLines.sort((a, b) => a - b);
         });
       } else {
-        const y = (e.clientY - rect.top) / rect.height;
+        // トリミング領域内での相対位置を計算
+        const y = (e.clientY - trimmedTop) / trimmedHeight;
         const clampedY = Math.max(0.02, Math.min(0.98, y));
         
         setRowLines(prev => {
@@ -673,7 +681,7 @@ const App: React.FC = () => {
         y: e.clientY - gridEditorPanStart.y
       });
     }
-  }, [draggingLineGrid, isGridEditorPanning, gridEditorPanStart]);
+  }, [draggingLineGrid, isGridEditorPanning, gridEditorPanStart, trim]);
 
   const handleGridEditorGlobalMouseUp = useCallback(() => {
     setIsGridEditorPanning(false);
@@ -1570,8 +1578,26 @@ const App: React.FC = () => {
                   draggable={false}
                 />
                 
-                {/* Grid Lines Overlay */}
-                <div className="absolute inset-0">
+                {/* Trim Overlay - トリミング範囲外を暗く */}
+                {(trim.top > 0 || trim.bottom > 0 || trim.left > 0 || trim.right > 0) && (
+                  <>
+                    {trim.top > 0 && <div className="absolute top-0 left-0 right-0 bg-black/60 pointer-events-none" style={{ height: `${trim.top * 100}%` }} />}
+                    {trim.bottom > 0 && <div className="absolute bottom-0 left-0 right-0 bg-black/60 pointer-events-none" style={{ height: `${trim.bottom * 100}%` }} />}
+                    {trim.left > 0 && <div className="absolute left-0 bg-black/60 pointer-events-none" style={{ width: `${trim.left * 100}%`, top: `${trim.top * 100}%`, bottom: `${trim.bottom * 100}%` }} />}
+                    {trim.right > 0 && <div className="absolute right-0 bg-black/60 pointer-events-none" style={{ width: `${trim.right * 100}%`, top: `${trim.top * 100}%`, bottom: `${trim.bottom * 100}%` }} />}
+                  </>
+                )}
+                
+                {/* Grid Lines Overlay - トリミング範囲内にグリッド表示 */}
+                <div 
+                  className="absolute"
+                  style={{
+                    left: `${trim.left * 100}%`,
+                    top: `${trim.top * 100}%`,
+                    right: `${trim.right * 100}%`,
+                    bottom: `${trim.bottom * 100}%`,
+                  }}
+                >
                   {/* Column lines (draggable) */}
                   {colLines.map((pos, i) => (
                     <div
@@ -1626,25 +1652,47 @@ const App: React.FC = () => {
                     );
                   })}
                 </div>
+                
+                {/* Trim boundary indicator */}
+                {(trim.top > 0 || trim.bottom > 0 || trim.left > 0 || trim.right > 0) && (
+                  <div 
+                    className="absolute border-2 border-dashed border-red-400 pointer-events-none z-40"
+                    style={{
+                      left: `${trim.left * 100}%`,
+                      top: `${trim.top * 100}%`,
+                      right: `${trim.right * 100}%`,
+                      bottom: `${trim.bottom * 100}%`,
+                    }}
+                  />
+                )}
               </div>
             </div>
             
             {/* Help Overlay */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 px-6 py-3 bg-black/70 backdrop-blur-sm rounded-2xl text-white text-sm font-medium">
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-wrap items-center justify-center gap-4 px-6 py-3 bg-black/70 backdrop-blur-sm rounded-2xl text-white text-sm font-medium max-w-[90%]">
               <span className="flex items-center gap-2">
                 <Move size={16} className="text-[#06C755]" />
                 緑のハンドルをドラッグ
               </span>
-              <span className="w-px h-5 bg-white/30"></span>
+              <span className="w-px h-5 bg-white/30 hidden sm:block"></span>
               <span className="flex items-center gap-2">
                 <span className="text-xs px-2 py-0.5 bg-white/20 rounded">空白部分</span>
                 をドラッグで画像移動
               </span>
-              <span className="w-px h-5 bg-white/30"></span>
+              <span className="w-px h-5 bg-white/30 hidden sm:block"></span>
               <span className="flex items-center gap-2">
                 <span className="text-xs px-2 py-0.5 bg-white/20 rounded">スクロール</span>
                 でズーム
               </span>
+              {(trim.top > 0 || trim.bottom > 0 || trim.left > 0 || trim.right > 0) && (
+                <>
+                  <span className="w-px h-5 bg-white/30 hidden sm:block"></span>
+                  <span className="flex items-center gap-2">
+                    <span className="w-3 h-3 border-2 border-dashed border-red-400 rounded-sm"></span>
+                    トリミング範囲
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
