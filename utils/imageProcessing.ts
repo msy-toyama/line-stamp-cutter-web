@@ -1166,9 +1166,9 @@ export const advancedBackgroundRemoval = (
     nextQueue.length = 0;
   }
 
-  // Step 2: 穴埋め処理 - 内部の閉じた領域も透過（エッジ保護付き）
-  // 穴が小さい場合のみ実行（パフォーマンス対策）
-  if (fillHoles && pixelCount < 600000) {
+  // Step 2: 穴埋め処理 - 内部の閉じた領域も透過（改善版）
+  // 文字間の隙間も適切に処理する
+  if (fillHoles && pixelCount < 800000) {
     // 外側の透明領域をマーク（BFS）
     const outsideTransparent = new Uint8Array(w * h);
     let borderQueue: number[] = [];
@@ -1221,7 +1221,9 @@ export const advancedBackgroundRemoval = (
       oNext.length = 0;
     }
 
-    // 穴を検出して透過（エッジ保護付き）
+    // === 改善版穴検出 ===
+    // 背景色に一致する全ての閉じた領域を検出して透過
+    // エッジに隣接していても、領域全体が背景色なら透過する
     const checkedForHoles = new Uint8Array(w * h);
     
     for (let y = 0; y < h; y++) {
@@ -1230,12 +1232,6 @@ export const advancedBackgroundRemoval = (
         const offset = idx * 4;
         
         if (checkedForHoles[idx] || data[offset + 3] === 0) continue;
-        
-        // エッジ保護チェック
-        if (edgeDistance && edgeDistance[idx] < EDGE_SAFE_MARGIN) {
-          checkedForHoles[idx] = 1;
-          continue;
-        }
         
         const r = data[offset];
         const g = data[offset + 1];
@@ -1247,18 +1243,15 @@ export const advancedBackgroundRemoval = (
           let hNext: number[] = [];
           checkedForHoles[idx] = 1;
           let touchesOutside = false;
-          let touchesEdge = false;
           
-          while (hQueue.length > 0 && holePixels.length < 50000) {
+          // 穴のサイズ制限を大きくして、文字間の大きな領域も対応
+          const maxHoleSize = 50000;
+          
+          while (hQueue.length > 0 && holePixels.length < maxHoleSize) {
             for (let i = 0; i < hQueue.length; i++) {
               const hIdx = hQueue[i];
               const hx = hIdx % w;
               const hy = (hIdx / w) | 0;
-              
-              // エッジに触れているかチェック
-              if (edgeDistance && edgeDistance[hIdx] < EDGE_SAFE_MARGIN) {
-                touchesEdge = true;
-              }
               
               holePixels.push(hIdx);
               
@@ -1266,6 +1259,7 @@ export const advancedBackgroundRemoval = (
                 if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
                   const nIdx = ny * w + nx;
                   
+                  // 外部の透明領域に触れているかチェック
                   if (outsideTransparent[nIdx]) {
                     touchesOutside = true;
                   }
@@ -1292,11 +1286,13 @@ export const advancedBackgroundRemoval = (
             hNext.length = 0;
           }
           
-          // 外側に繋がっておらず、エッジにも触れていない場合のみ透過
-          if (!touchesOutside && !touchesEdge && holePixels.length > 0) {
+          // 外部に繋がっていない閉じた領域のみ透過
+          // エッジに隣接しているかどうかは関係なく、背景色なら透過
+          if (!touchesOutside && holePixels.length > 0 && holePixels.length < maxHoleSize) {
             for (const hIdx of holePixels) {
-              // 各ピクセルのエッジ距離も再チェック
-              if (!edgeDistance || edgeDistance[hIdx] >= EDGE_SAFE_MARGIN) {
+              // エッジ保護を緩和（1ピクセル以内のみ保護）
+              const edgeDist = edgeDistance ? edgeDistance[hIdx] : 255;
+              if (edgeDist >= 1) {
                 data[hIdx * 4 + 3] = 0;
               }
             }
@@ -1556,8 +1552,9 @@ export const autoRemoveBackground = (
     }
   }
 
-  // 穴埋め（簡略化版 - 大きい画像ではスキップ）
-  if (fillHoles && pixelCount < 500000) {
+  // 穴埋め - 内部の閉じた背景領域を透過（改善版）
+  // 文字間の隙間も適切に処理する
+  if (fillHoles && pixelCount < 800000) {
     const outsideTransparent = new Uint8Array(w * h);
     const borderSeeds: [number, number][] = [];
     
@@ -1580,7 +1577,6 @@ export const autoRemoveBackground = (
           const [tx, ty] = tStack.pop()!;
           const tIdx = ty * w + tx;
           
-          // インライン展開で高速化
           if (tx + 1 < w) {
             const nIdx = tIdx + 1;
             if (!outsideTransparent[nIdx] && data[nIdx * 4 + 3] === 0) {
@@ -1613,8 +1609,13 @@ export const autoRemoveBackground = (
       }
     }
 
-    // 穴を検出して透過（高速版 - RGB距離）
+    // === 改善版穴検出 ===
+    // 背景色に一致する全ての閉じた領域を検出して透過
+    // エッジに隣接していても、領域全体が背景色なら透過する
     const checkedForHoles = new Uint8Array(w * h);
+    
+    // より寛容な許容値（内部の穴検出用）
+    const holeRgbTolerance = rgbTolerance * 1.2;
     
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -1623,33 +1624,23 @@ export const autoRemoveBackground = (
         
         if (checkedForHoles[idx] || data[offset + 3] === 0) continue;
         
-        // エッジ保護
-        if (edgeDistance && edgeDistance[idx] < EDGE_SAFE_MARGIN) {
-          checkedForHoles[idx] = 1;
-          continue;
-        }
-        
         const r = data[offset];
         const g = data[offset + 1];
         const b = data[offset + 2];
         
-        if (rgbDistance(r, g, b, targetR, targetG, targetB) <= rgbTolerance) {
+        // 背景色に一致するか確認
+        if (rgbDistance(r, g, b, targetR, targetG, targetB) <= holeRgbTolerance) {
           const holePixels: number[] = [];
           const holeStack: [number, number][] = [[x, y]];
           checkedForHoles[idx] = 1;
           let touchesOutside = false;
-          let touchesEdge = false;
           
-          // 穴のサイズ制限（無限ループ防止）
-          const maxHoleSize = 10000;
+          // 穴のサイズ制限を大きくして、文字間の大きな領域も対応
+          const maxHoleSize = 50000;
           
           while (holeStack.length > 0 && holePixels.length < maxHoleSize) {
             const [hx, hy] = holeStack.pop()!;
             const hIdx = hy * w + hx;
-            
-            if (edgeDistance && edgeDistance[hIdx] < EDGE_SAFE_MARGIN) {
-              touchesEdge = true;
-            }
             
             holePixels.push(hIdx);
             
@@ -1658,6 +1649,7 @@ export const autoRemoveBackground = (
               if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
                 const nIdx = ny * w + nx;
                 
+                // 外部の透明領域に触れているかチェック
                 if (outsideTransparent[nIdx]) {
                   touchesOutside = true;
                 }
@@ -1665,7 +1657,8 @@ export const autoRemoveBackground = (
                 if (!checkedForHoles[nIdx]) {
                   const nOffset = nIdx * 4;
                   if (data[nOffset + 3] !== 0) {
-                    if (rgbDistance(data[nOffset], data[nOffset + 1], data[nOffset + 2], targetR, targetG, targetB) <= rgbTolerance) {
+                    // 背景色に一致する隣接ピクセルを追加
+                    if (rgbDistance(data[nOffset], data[nOffset + 1], data[nOffset + 2], targetR, targetG, targetB) <= holeRgbTolerance) {
                       checkedForHoles[nIdx] = 1;
                       holeStack.push([nx, ny]);
                     }
@@ -1680,9 +1673,16 @@ export const autoRemoveBackground = (
             checkNeighbor(hx, hy - 1);
           }
           
-          if (!touchesOutside && !touchesEdge && holePixels.length > 0 && holePixels.length < maxHoleSize) {
+          // 外部に繋がっていない閉じた領域のみ透過
+          // エッジに隣接しているかどうかは関係なく、背景色なら透過
+          if (!touchesOutside && holePixels.length > 0 && holePixels.length < maxHoleSize) {
+            // 穴の中心部のピクセルのみ透過（エッジ保護を緩和）
             for (const hIdx of holePixels) {
-              if (!edgeDistance || edgeDistance[hIdx] >= EDGE_SAFE_MARGIN) {
+              // エッジ保護を完全に無効化するか、非常に緩い条件にする
+              // 穴として検出された領域は基本的に全て透過
+              const edgeDist = edgeDistance ? edgeDistance[hIdx] : 255;
+              // エッジから1ピクセル以内は保護（文字の輪郭を守る）
+              if (edgeDist >= 1) {
                 data[hIdx * 4 + 3] = 0;
               }
             }
