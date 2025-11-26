@@ -512,10 +512,48 @@ export const createMainImage = (
   });
 };
 
+/**
+ * 画像を指定サイズにリサイズする
+ */
+const resizeImage = (dataUrl: string, targetWidth: number, targetHeight: number): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.clearRect(0, 0, targetWidth, targetHeight);
+        
+        // アスペクト比を維持してセンタリング
+        const scale = Math.min(targetWidth / img.width, targetHeight / img.height);
+        const scaledWidth = img.width * scale;
+        const scaledHeight = img.height * scale;
+        const offsetX = (targetWidth - scaledWidth) / 2;
+        const offsetY = (targetHeight - scaledHeight) / 2;
+        
+        ctx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+        resolve(canvas.toDataURL('image/png', 1.0));
+      } else {
+        reject(new Error("Canvas context failed"));
+      }
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+};
+
 export const downloadStickerSet = async (
   stickers: { id: number; dataUrl: string }[],
   mainImage: string | null,
-  fileNamePrefix: string = "sticker"
+  tabImage: string | null,
+  fileNamePrefix: string = "sticker",
+  stickerSize: { width: number; height: number } = { width: 370, height: 320 },
+  mainSize: { width: number; height: number } = { width: 240, height: 240 },
+  tabSize: { width: number; height: number } = { width: 96, height: 74 }
 ) => {
   if (!window.JSZip) {
     alert("ZIP library not loaded. Please refresh.");
@@ -525,19 +563,29 @@ export const downloadStickerSet = async (
   const zip = new window.JSZip();
   const folder = zip.folder("line_stickers");
 
-  // Add stickers
-  stickers.forEach((sticker, index) => {
-    // Extract base64
-    const data = sticker.dataUrl.split(',')[1];
+  // Add stickers (リサイズして追加)
+  for (let index = 0; index < stickers.length; index++) {
+    const sticker = stickers[index];
+    // スタンプをリサイズ
+    const resized = await resizeImage(sticker.dataUrl, stickerSize.width, stickerSize.height);
+    const data = resized.split(',')[1];
     // LINE usually requires 01.png, 02.png etc.
     const num = (index + 1).toString().padStart(2, '0');
     folder.file(`${num}.png`, data, { base64: true });
-  });
+  }
 
-  // Add main image if exists
+  // Add main image if exists (リサイズして追加)
   if (mainImage) {
-    const data = mainImage.split(',')[1];
+    const resizedMain = await resizeImage(mainImage, mainSize.width, mainSize.height);
+    const data = resizedMain.split(',')[1];
     folder.file("main.png", data, { base64: true });
+  }
+
+  // Add tab image if exists (リサイズして追加)
+  if (tabImage) {
+    const resizedTab = await resizeImage(tabImage, tabSize.width, tabSize.height);
+    const data = resizedTab.split(',')[1];
+    folder.file("tab.png", data, { base64: true });
   }
 
   // Generate and save

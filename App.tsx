@@ -124,6 +124,10 @@ const App: React.FC = () => {
   const [stickers, setStickers] = useState<Sticker[]>([]);
   const [mainImage, setMainImage] = useState<string | null>(null);
   const [mainImageIndex, setMainImageIndex] = useState<number>(-1);
+  const [customMainImage, setCustomMainImage] = useState<string | null>(null); // カスタムアップロードしたメイン画像
+  const [customTabImage, setCustomTabImage] = useState<string | null>(null); // カスタムアップロードしたタブ画像
+  const mainImageInputRef = useRef<HTMLInputElement>(null);
+  const tabImageInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [legalModal, setLegalModal] = useState<'privacy' | 'terms' | null>(null);
   
@@ -430,6 +434,8 @@ const App: React.FC = () => {
     setStickers([]);
     setMainImage(null);
     setMainImageIndex(-1);
+    setCustomMainImage(null);
+    setCustomTabImage(null);
     setLayout({ cols: 6, rows: 4 });
     setTrim({ top: 0, bottom: 0, left: 0, right: 0 });
     setGap({ x: 0, y: 0 });
@@ -440,6 +446,8 @@ const App: React.FC = () => {
     setUseCustomLines(false);
     setShowResetModal(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (mainImageInputRef.current) mainImageInputRef.current.value = '';
+    if (tabImageInputRef.current) tabImageInputRef.current.value = '';
   };
 
   // カスタムグリッド線を使ってスライス
@@ -918,6 +926,7 @@ const App: React.FC = () => {
 
   const handleSetMainImage = async (index: number, dataUrl: string) => {
     setMainImageIndex(index);
+    setCustomMainImage(null); // スタンプからメインを選択時はカスタム画像をクリア
     try {
       const resized = await createMainImage(dataUrl);
       setMainImage(resized);
@@ -926,9 +935,63 @@ const App: React.FC = () => {
     }
   };
 
+  // カスタムメイン画像アップロードハンドラー
+  const handleMainImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+      try {
+        const resized = await createMainImage(dataUrl);
+        setCustomMainImage(resized);
+        setMainImage(resized);
+        setMainImageIndex(-1); // カスタム画像使用時はスタンプからの選択をクリア
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    reader.readAsDataURL(file);
+    
+    // inputをリセット（同じファイルを再選択可能にする）
+    if (mainImageInputRef.current) {
+      mainImageInputRef.current.value = '';
+    }
+  };
+
+  // 実際に使用するメイン画像（カスタム優先）
+  const effectiveMainImage = customMainImage || mainImage;
+
+  // タブ画像アップロードハンドラー
+  const handleTabImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+      setCustomTabImage(dataUrl);
+    };
+    reader.readAsDataURL(file);
+    
+    if (tabImageInputRef.current) {
+      tabImageInputRef.current.value = '';
+    }
+  };
+
   const handleDownload = () => {
     if (stickers.length === 0) return;
-    downloadStickerSet(stickers, mainImage);
+    // スタンプサイズ: 370x320, メインサイズ: 240x240, タブサイズ: 96x74
+    downloadStickerSet(
+      stickers, 
+      effectiveMainImage,
+      customTabImage,
+      "sticker",
+      { width: 370, height: 320 },
+      { width: 240, height: 240 },
+      { width: 96, height: 74 }
+    );
   };
 
   const handleSaveEditedSticker = (newSrc: string) => {
@@ -1522,16 +1585,120 @@ const App: React.FC = () => {
           {/* Sticker Grid */}
           <div className="flex-1 overflow-y-auto p-3 sm:p-6 scrollbar-premium">
             {/* Main Image Card */}
-            <div className="mb-4 sm:mb-6 card-premium rounded-xl sm:rounded-2xl p-3 sm:p-5 flex items-center gap-3 sm:gap-5 animate-fade-in-up">
-              <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg sm:rounded-xl border-2 border-[#06C755] bg-[#E8F8EE] overflow-hidden shrink-0 flex items-center justify-center shadow-line">
-                {mainImage ? <img src={mainImage} alt="Main" className="w-full h-full object-contain" /> : <span className="text-xs text-gray-400">なし</span>}
-              </div>
-              <div className="space-y-1 flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h4 className="font-bold text-gray-900 text-sm sm:text-base">メイン画像</h4>
-                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full text-white gradient-line">必須</span>
+            <div className="mb-4 sm:mb-6 card-premium rounded-xl sm:rounded-2xl p-3 sm:p-5 animate-fade-in-up">
+              <div className="flex items-center gap-3 sm:gap-5">
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg sm:rounded-xl border-2 border-[#06C755] bg-[#E8F8EE] overflow-hidden shrink-0 flex items-center justify-center shadow-line">
+                  {effectiveMainImage ? (
+                    <img src={effectiveMainImage} alt="Main" className="w-full h-full object-contain" />
+                  ) : (
+                    <span className="text-xs text-gray-400">なし</span>
+                  )}
+                  {customMainImage && (
+                    <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
+                      <Upload size={8} className="text-white" />
+                    </div>
+                  )}
                 </div>
-                <p className="text-[10px] sm:text-xs text-gray-500 truncate">ストアに表示されるアイコン</p>
+                <div className="space-y-1 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-gray-900 text-sm sm:text-base">メイン画像</h4>
+                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-full text-white gradient-line">必須</span>
+                    {customMainImage && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-100 text-blue-600">カスタム</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] sm:text-xs text-gray-500">ストアに表示されるアイコン (240×240px)</p>
+                </div>
+              </div>
+              
+              {/* Main Image Upload/Change Buttons */}
+              <div className="flex gap-2 mt-3">
+                <input
+                  ref={mainImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleMainImageUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => mainImageInputRef.current?.click()}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border-2 border-dashed border-gray-300 text-gray-600 hover:border-[#06C755] hover:text-[#06C755] active:bg-[#E8F8EE] transition-all"
+                >
+                  <Upload size={14} />
+                  {customMainImage ? '別の画像をアップロード' : 'カスタム画像をアップロード'}
+                </button>
+                {customMainImage && (
+                  <button
+                    onClick={() => {
+                      setCustomMainImage(null);
+                      // スタンプからのメイン画像を復元
+                      if (mainImageIndex >= 0 && stickers[mainImageIndex]) {
+                        handleSetMainImage(mainImageIndex, stickers[mainImageIndex].dataUrl);
+                      }
+                    }}
+                    className="px-3 py-2 rounded-lg text-xs font-bold border-2 border-gray-200 text-gray-500 hover:border-red-400 hover:text-red-500 active:bg-red-50 transition-all"
+                  >
+                    取消
+                  </button>
+                )}
+              </div>
+              
+              {!customMainImage && (
+                <p className="text-[10px] text-gray-400 mt-2">※ 下のスタンプをクリックしてメイン画像に設定することもできます</p>
+              )}
+            </div>
+
+            {/* Tab Image Card */}
+            <div className="mb-4 sm:mb-6 card-premium rounded-xl sm:rounded-2xl p-3 sm:p-5 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
+              <div className="flex items-center gap-3 sm:gap-5">
+                <div className="relative w-12 h-10 sm:w-16 sm:h-12 rounded-lg sm:rounded-xl border-2 border-amber-500 bg-amber-50 overflow-hidden shrink-0 flex items-center justify-center">
+                  {customTabImage ? (
+                    <img src={customTabImage} alt="Tab" className="w-full h-full object-contain" />
+                  ) : (
+                    <span className="text-[10px] text-gray-400">なし</span>
+                  )}
+                  {customTabImage && (
+                    <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center">
+                      <Upload size={8} className="text-white" />
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-gray-900 text-sm sm:text-base">タブ画像</h4>
+                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-700">任意</span>
+                    {customTabImage && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-600">設定済み</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] sm:text-xs text-gray-500">トークルームのタブに表示 (96×74px)</p>
+                </div>
+              </div>
+              
+              {/* Tab Image Upload/Change Buttons */}
+              <div className="flex gap-2 mt-3">
+                <input
+                  ref={tabImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleTabImageUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => tabImageInputRef.current?.click()}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border-2 border-dashed border-gray-300 text-gray-600 hover:border-amber-500 hover:text-amber-600 active:bg-amber-50 transition-all"
+                >
+                  <Upload size={14} />
+                  {customTabImage ? '別の画像をアップロード' : 'タブ画像をアップロード'}
+                </button>
+                {customTabImage && (
+                  <button
+                    onClick={() => setCustomTabImage(null)}
+                    className="px-3 py-2 rounded-lg text-xs font-bold border-2 border-gray-200 text-gray-500 hover:border-red-400 hover:text-red-500 active:bg-red-50 transition-all"
+                  >
+                    削除
+                  </button>
+                )}
               </div>
             </div>
 
