@@ -517,7 +517,7 @@ export const downloadStickerSet = async (
   mainImage: string | null,
   fileNamePrefix: string = "sticker"
 ) => {
-  if (!window.JSZip || !window.saveAs) {
+  if (!window.JSZip) {
     alert("ZIP library not loaded. Please refresh.");
     return;
   }
@@ -542,7 +542,30 @@ export const downloadStickerSet = async (
 
   // Generate and save
   const content = await zip.generateAsync({ type: "blob" });
-  window.saveAs(content, `${fileNamePrefix}_set.zip`);
+  
+  // モバイル対応: saveAs が使えない場合は直接ダウンロード
+  const fileName = `${fileNamePrefix}_set.zip`;
+  
+  if (window.saveAs) {
+    window.saveAs(content, fileName);
+  } else {
+    // Fallback: Blob URL を使用したダウンロード（iOS Safari対応）
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    
+    // iOS Safari では click() が効かない場合があるため、タイムアウトを設定
+    setTimeout(() => {
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    }, 0);
+  }
 };
 
 // --- COLOR EDITING UTILS ---

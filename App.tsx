@@ -1701,63 +1701,75 @@ const App: React.FC = () => {
       {/* Grid Editor Popup Modal */}
       {showGridEditor && uploadedImage && (
         <div className="fixed inset-0 z-[200] flex flex-col bg-gray-900/95 backdrop-blur-md animate-fade-in">
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 bg-gray-900/50 border-b border-white/10">
-            <div className="flex items-center gap-4">
+          {/* Header - モバイル対応 */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-3 sm:px-6 py-3 sm:py-4 bg-gray-900/50 border-b border-white/10 gap-2 sm:gap-0">
+            {/* Top row - Title and Close/Complete */}
+            <div className="flex items-center justify-between sm:justify-start gap-3 sm:gap-4">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={closeGridEditor}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 active:bg-white/30 text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-white">グリッド線エディター</h2>
+                  <p className="text-[10px] sm:text-xs text-white/60 hidden sm:block">線をドラッグして位置を調整</p>
+                </div>
+              </div>
+              
+              {/* Mobile: Complete button in header */}
               <button
                 onClick={closeGridEditor}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors"
+                className="sm:hidden flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#06C755] active:bg-[#05A347] text-white font-bold transition-colors"
               >
-                <X size={20} />
+                <Check size={16} />
+                完了
               </button>
-              <div>
-                <h2 className="text-lg font-bold text-white">グリッド線エディター</h2>
-                <p className="text-xs text-white/60">線をドラッグして位置を調整</p>
-              </div>
             </div>
             
-            {/* Undo/Redo + Zoom Controls */}
-            <div className="flex items-center gap-4">
+            {/* Bottom row on mobile / Right side on desktop - Controls */}
+            <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-4 overflow-x-auto pb-1 sm:pb-0">
               {/* Undo/Redo */}
-              <div className="flex items-center gap-1 bg-white/5 rounded-xl p-1">
+              <div className="flex items-center gap-1 bg-white/5 rounded-xl p-1 shrink-0">
                 <button 
                   onClick={undoGridChange}
                   disabled={historyIndex < 0}
-                  className={`p-2.5 rounded-lg transition-colors ${historyIndex >= 0 ? 'bg-white/10 hover:bg-white/20 text-white' : 'text-white/30 cursor-not-allowed'}`}
-                  title="元に戻す (Undo)"
+                  className={`p-2 sm:p-2.5 rounded-lg transition-colors ${historyIndex >= 0 ? 'bg-white/10 hover:bg-white/20 active:bg-white/30 text-white' : 'text-white/30 cursor-not-allowed'}`}
+                  title="元に戻す"
                 >
-                  <Undo2 size={18} />
+                  <Undo2 size={16} />
                 </button>
                 <button 
                   onClick={redoGridChange}
                   disabled={historyIndex >= gridHistory.length - 1}
-                  className={`p-2.5 rounded-lg transition-colors ${historyIndex < gridHistory.length - 1 ? 'bg-white/10 hover:bg-white/20 text-white' : 'text-white/30 cursor-not-allowed'}`}
-                  title="やり直す (Redo)"
+                  className={`p-2 sm:p-2.5 rounded-lg transition-colors ${historyIndex < gridHistory.length - 1 ? 'bg-white/10 hover:bg-white/20 active:bg-white/30 text-white' : 'text-white/30 cursor-not-allowed'}`}
+                  title="やり直す"
                 >
-                  <Redo2 size={18} />
+                  <Redo2 size={16} />
                 </button>
               </div>
               
               {/* Zoom Controls */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                 <button 
                   onClick={() => setGridEditorZoom(z => Math.max(0.5, z - 0.25))} 
-                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 active:bg-white/30 text-white transition-colors"
                 >
-                  <ZoomOut size={18} />
+                  <ZoomOut size={16} />
                 </button>
-                <div className="px-3 py-1.5 bg-white/10 rounded-xl text-sm font-bold text-white min-w-[60px] text-center">
+                <div className="px-2 sm:px-3 py-1.5 bg-white/10 rounded-xl text-xs sm:text-sm font-bold text-white min-w-[50px] sm:min-w-[60px] text-center">
                   {Math.round(gridEditorZoom * 100)}%
                 </div>
                 <button 
                   onClick={() => setGridEditorZoom(z => Math.min(3, z + 0.25))} 
-                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 active:bg-white/30 text-white transition-colors"
                 >
-                  <ZoomIn size={18} />
+                  <ZoomIn size={16} />
                 </button>
                 <button 
                   onClick={() => { setGridEditorZoom(1); setGridEditorPan({ x: 0, y: 0 }); }} 
-                  className="ml-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-colors"
+                  className="hidden sm:block ml-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-colors"
                 >
                   表示リセット
                 </button>
@@ -1766,20 +1778,20 @@ const App: React.FC = () => {
               {/* Reset Grid */}
               <button 
                 onClick={resetGridLines}
-                className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-sm font-medium transition-colors"
+                className="px-3 sm:px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 active:bg-amber-500/40 text-amber-400 text-xs sm:text-sm font-medium transition-colors shrink-0"
               >
-                グリッドリセット
+                <span className="hidden sm:inline">グリッド</span>リセット
+              </button>
+              
+              {/* Desktop: Apply Button */}
+              <button
+                onClick={closeGridEditor}
+                className="hidden sm:flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#06C755] hover:bg-[#05A347] text-white font-bold transition-colors shadow-lg shadow-[#06C755]/30"
+              >
+                <Check size={18} />
+                完了
               </button>
             </div>
-            
-            {/* Apply Button */}
-            <button
-              onClick={closeGridEditor}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#06C755] hover:bg-[#05A347] text-white font-bold transition-colors shadow-lg shadow-[#06C755]/30"
-            >
-              <Check size={18} />
-              完了
-            </button>
           </div>
           
           {/* Editor Canvas */}
@@ -1802,7 +1814,7 @@ const App: React.FC = () => {
                   src={uploadedImage} 
                   alt="Grid Editor" 
                   className="max-w-none shadow-2xl rounded-lg"
-                  style={{ maxHeight: '70vh', width: 'auto' }}
+                  style={{ maxHeight: 'min(70vh, calc(100dvh - 180px))', width: 'auto' }}
                   draggable={false}
                 />
                 
@@ -1899,27 +1911,31 @@ const App: React.FC = () => {
             </div>
             
             {/* Help Overlay */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-wrap items-center justify-center gap-4 px-6 py-3 bg-black/70 backdrop-blur-sm rounded-2xl text-white text-sm font-medium max-w-[90%]">
-              <span className="flex items-center gap-2">
-                <Move size={16} className="text-[#06C755]" />
-                緑のハンドルをドラッグ
+            <div className="absolute bottom-2 sm:bottom-6 left-1/2 -translate-x-1/2 flex flex-wrap items-center justify-center gap-2 sm:gap-4 px-3 sm:px-6 py-2 sm:py-3 bg-black/70 backdrop-blur-sm rounded-xl sm:rounded-2xl text-white text-xs sm:text-sm font-medium max-w-[95%] sm:max-w-[90%]">
+              <span className="flex items-center gap-1 sm:gap-2">
+                <Move size={14} className="text-[#06C755] sm:hidden" />
+                <Move size={16} className="text-[#06C755] hidden sm:block" />
+                <span className="hidden sm:inline">緑のハンドルをドラッグ</span>
+                <span className="sm:hidden">ハンドルをドラッグ</span>
               </span>
-              <span className="w-px h-5 bg-white/30 hidden sm:block"></span>
-              <span className="flex items-center gap-2">
-                <span className="text-xs px-2 py-0.5 bg-white/20 rounded">空白部分</span>
-                をドラッグで画像移動
+              <span className="w-px h-4 sm:h-5 bg-white/30"></span>
+              <span className="flex items-center gap-1 sm:gap-2">
+                <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-white/20 rounded">空白</span>
+                <span className="hidden sm:inline">をドラッグで画像移動</span>
+                <span className="sm:hidden">で移動</span>
               </span>
-              <span className="w-px h-5 bg-white/30 hidden sm:block"></span>
-              <span className="flex items-center gap-2">
+              <span className="w-px h-4 sm:h-5 bg-white/30 hidden sm:block"></span>
+              <span className="hidden sm:flex items-center gap-2">
                 <span className="text-xs px-2 py-0.5 bg-white/20 rounded">スクロール</span>
                 でズーム
               </span>
               {(trim.top > 0 || trim.bottom > 0 || trim.left > 0 || trim.right > 0) && (
                 <>
-                  <span className="w-px h-5 bg-white/30 hidden sm:block"></span>
-                  <span className="flex items-center gap-2">
-                    <span className="w-3 h-3 border-2 border-dashed border-red-400 rounded-sm"></span>
-                    トリミング範囲
+                  <span className="w-px h-4 sm:h-5 bg-white/30"></span>
+                  <span className="flex items-center gap-1 sm:gap-2">
+                    <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 border-2 border-dashed border-red-400 rounded-sm"></span>
+                    <span className="hidden sm:inline">トリミング範囲</span>
+                    <span className="sm:hidden">トリム</span>
                   </span>
                 </>
               )}
