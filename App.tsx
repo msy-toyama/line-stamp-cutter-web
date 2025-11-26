@@ -3,10 +3,10 @@ import {
   Upload, Download, CheckCircle, Scissors, ArrowLeft, Grid3X3, Layers, 
   Sliders, RefreshCw, Wand2, Crop, ZoomIn, ZoomOut, Sparkles, Star,
   Move, GripVertical, Settings, Eye, ChevronRight, Check, X, Maximize2,
-  Undo2, Redo2, ExternalLink, Shield, FileText
+  Undo2, Redo2, ExternalLink, Shield, FileText, Plus, Image as ImageIcon
 } from 'lucide-react';
 import { Sticker } from './types';
-import { createMainImage, downloadStickerSet, processImage, sliceImage, TrimConfig } from './utils/imageProcessing';
+import { createMainImage, downloadStickerSet, processImage, processMultipleImages, sliceImage, TrimConfig, combineImagesVertically } from './utils/imageProcessing';
 import EditorModal from './components/EditorModal';
 
 // プライバシーポリシー・利用規約モーダル
@@ -158,6 +158,7 @@ const App: React.FC = () => {
   const [historyIndex, setHistoryIndex] = useState(-1);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const addImageInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const gridEditorImageRef = useRef<HTMLImageElement>(null);
@@ -233,10 +234,20 @@ const App: React.FC = () => {
     if (!files || files.length === 0) return;
 
     setIsProcessing(true);
-    const file = files[0];
 
     try {
-      const { stickers: slicedDataUrls, firstImageSrc, layout: detectedLayout } = await processImage(file);
+      let result;
+      
+      if (files.length === 1) {
+        // 単一ファイルの場合
+        result = await processImage(files[0]);
+      } else {
+        // 複数ファイルの場合：縦に結合
+        const fileArray = Array.from(files);
+        result = await processMultipleImages(fileArray);
+      }
+      
+      const { stickers: slicedDataUrls, firstImageSrc, layout: detectedLayout } = result;
 
       setUploadedImage(firstImageSrc);
       setLayout(detectedLayout);
@@ -267,8 +278,11 @@ const App: React.FC = () => {
     }
   };
 
-  const handleFileDrop = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
+  const handleFileDrop = async (files: File[]) => {
+    // 画像ファイルのみフィルタ
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    
+    if (imageFiles.length === 0) {
       alert('画像ファイルをアップロードしてください。');
       return;
     }
@@ -276,7 +290,15 @@ const App: React.FC = () => {
     setIsProcessing(true);
     
     try {
-      const { stickers: slicedDataUrls, firstImageSrc, layout: detectedLayout } = await processImage(file);
+      let result;
+      
+      if (imageFiles.length === 1) {
+        result = await processImage(imageFiles[0]);
+      } else {
+        result = await processMultipleImages(imageFiles);
+      }
+      
+      const { stickers: slicedDataUrls, firstImageSrc, layout: detectedLayout } = result;
 
       setUploadedImage(firstImageSrc);
       setLayout(detectedLayout);
@@ -304,6 +326,70 @@ const App: React.FC = () => {
       alert("画像の処理中にエラーが発生しました。");
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // 既存の画像に追加の画像を結合する
+  const handleAddImages = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0 || !uploadedImage) return;
+
+    setIsProcessing(true);
+
+    try {
+      // 現在の画像をBlobに変換
+      const currentImageBlob = await fetch(uploadedImage).then(r => r.blob());
+      const currentImageFile = new File([currentImageBlob], 'current.png', { type: 'image/png' });
+      
+      // 新しいファイルを結合
+      const allFiles = [currentImageFile, ...Array.from(files)];
+      const combinedDataUrl = await combineImagesVertically(allFiles);
+      
+      // 結合された画像を処理
+      const img = new Image();
+      img.onload = async () => {
+        // 現在のレイアウトを維持しつつ行数を追加ファイル分増やす
+        const newRows = layout.rows + files.length; // 追加画像1枚につき1行増やす（簡易的な推定）
+        const newLayout = { cols: layout.cols, rows: newRows };
+        
+        setUploadedImage(combinedDataUrl);
+        setLayout(newLayout);
+        setUseCustomLines(false);
+        initializeGridLines(newLayout.cols, newLayout.rows);
+        
+        const slices = await sliceImage(img, newLayout.cols, newLayout.rows, trim, gap);
+        const newStickers: Sticker[] = slices.map((url, index) => ({
+          id: index,
+          originalIndex: index,
+          dataUrl: url,
+          isMain: false
+        }));
+        
+        setStickers(newStickers);
+        
+        if (newStickers.length > 0 && mainImageIndex >= 0 && mainImageIndex < newStickers.length) {
+          handleSetMainImage(mainImageIndex, newStickers[mainImageIndex].dataUrl);
+        } else if (newStickers.length > 0) {
+          handleSetMainImage(0, newStickers[0].dataUrl);
+        }
+        
+        setIsProcessing(false);
+      };
+      img.onerror = () => {
+        alert("画像の結合中にエラーが発生しました。");
+        setIsProcessing(false);
+      };
+      img.src = combinedDataUrl;
+      
+    } catch (error) {
+      console.error("Error adding images", error);
+      alert("画像の追加中にエラーが発生しました。");
+      setIsProcessing(false);
+    }
+    
+    // 入力をリセット
+    if (addImageInputRef.current) {
+      addImageInputRef.current.value = '';
     }
   };
 
@@ -331,7 +417,7 @@ const App: React.FC = () => {
     
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      handleFileDrop(files[0]);
+      handleFileDrop(Array.from(files));
     }
   };
 
@@ -868,7 +954,7 @@ const App: React.FC = () => {
                     ? 'border-[#06C755] bg-[#E8F8EE] scale-[1.02] shadow-line-lg' 
                     : 'border-gray-200 hover:border-[#06C755] hover:shadow-line'}`}
                 >
-                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" multiple onChange={handleFileUpload} />
                   
                   <div className="flex flex-col items-center gap-6">
                     {isProcessing ? (
@@ -889,7 +975,10 @@ const App: React.FC = () => {
                           <h3 className={`text-2xl font-bold mb-2 transition-colors ${isDragging ? 'text-[#06C755]' : 'text-gray-900'}`}>
                             {isDragging ? 'ドロップしてアップロード' : '画像をアップロード'}
                           </h3>
-                          <p className="text-gray-400 mb-4">クリックまたはドラッグ＆ドロップ</p>
+                          <p className="text-gray-400 mb-2">クリックまたはドラッグ＆ドロップ</p>
+                          <p className="text-xs text-[#06C755] font-medium mb-4 flex items-center justify-center gap-1">
+                            <Plus size={12} /> 複数画像を選択すると縦に結合されます
+                          </p>
                           <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
                             <span className="px-2 py-1 rounded bg-gray-100">PNG</span>
                             <span className="px-2 py-1 rounded bg-gray-100">JPG</span>
@@ -1170,6 +1259,25 @@ const App: React.FC = () => {
                   </button>
                 )}
               </div>
+            </div>
+
+            {/* Add Image Button */}
+            <div className="relative">
+              <input 
+                type="file" 
+                ref={addImageInputRef} 
+                className="hidden" 
+                accept="image/*" 
+                multiple 
+                onChange={handleAddImages} 
+              />
+              <button 
+                onClick={() => addImageInputRef.current?.click()}
+                disabled={isProcessing}
+                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold transition-all text-sm border-2 border-dashed border-[#06C755] text-[#06C755] hover:bg-[#E8F8EE] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Plus size={16} /> 画像を追加（縦に結合）
+              </button>
             </div>
 
             {/* Background Edit Button */}

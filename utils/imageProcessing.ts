@@ -383,6 +383,106 @@ export const processImage = async (
   });
 };
 
+/**
+ * 複数の画像ファイルを縦に結合する
+ * @param files 結合する画像ファイルの配列
+ * @returns 結合された画像のDataURL
+ */
+export const combineImagesVertically = async (
+  files: File[]
+): Promise<string> => {
+  if (files.length === 0) {
+    throw new Error('No files provided');
+  }
+  
+  if (files.length === 1) {
+    return URL.createObjectURL(files[0]);
+  }
+  
+  // 全ての画像を読み込む
+  const loadImage = (file: File): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error(`Failed to load image: ${file.name}`));
+      };
+      img.src = url;
+    });
+  };
+  
+  const images = await Promise.all(files.map(loadImage));
+  
+  // 全ての画像を最初の画像の幅に合わせてリサイズし、縦に結合
+  const targetWidth = images[0].width;
+  
+  // 各画像の高さを計算（幅に合わせてスケール）
+  const scaledHeights = images.map(img => {
+    const scale = targetWidth / img.width;
+    return Math.round(img.height * scale);
+  });
+  
+  const totalHeight = scaledHeights.reduce((sum, h) => sum + h, 0);
+  
+  // キャンバスを作成して画像を結合
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = totalHeight;
+  const ctx = canvas.getContext('2d');
+  
+  if (!ctx) {
+    throw new Error('Failed to get canvas context');
+  }
+  
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  
+  let currentY = 0;
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    const scaledHeight = scaledHeights[i];
+    ctx.drawImage(img, 0, currentY, targetWidth, scaledHeight);
+    currentY += scaledHeight;
+  }
+  
+  return canvas.toDataURL('image/png', 1.0);
+};
+
+/**
+ * 複数の画像を縦に結合した画像を処理する
+ */
+export const processMultipleImages = async (
+  files: File[]
+): Promise<{ stickers: string[], firstImageSrc: string, layout: { cols: number, rows: number } }> => {
+  // 画像を縦に結合
+  const combinedDataUrl = await combineImagesVertically(files);
+  
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = async () => {
+      // 結合された画像からレイアウトを検出
+      const analyzed = analyzeGridFromImage(img);
+      
+      let layout: { cols: number; rows: number };
+      if (analyzed.confidence > 0.3) {
+        layout = { cols: analyzed.cols, rows: analyzed.rows };
+      } else {
+        layout = detectGridLayout(img.width, img.height);
+      }
+      
+      const slices = await sliceImage(img, layout.cols, layout.rows);
+      resolve({ stickers: slices, firstImageSrc: combinedDataUrl, layout });
+    };
+    img.onerror = reject;
+    img.src = combinedDataUrl;
+  });
+};
+
 
 /**
  * Creates a "Main" image (240x240) from a specific sticker source data.
