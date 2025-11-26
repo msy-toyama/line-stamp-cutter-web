@@ -490,3 +490,60 @@ input[type="range"]::-moz-range-thumb {
     animation: fadeInUp 0.5s ease-out forwards;
   }
 }
+
+/* Mobile Touch Improvements */
+@media (max-width: 1024px) {
+  /* Larger touch targets */
+  button, input[type="range"] {
+    min-height: 44px;
+  }
+  
+  /* Better touch scrolling */
+  .scrollbar-premium {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Prevent text selection on touch */
+  .touch-none {
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  
+  /* Mobile grid handles - larger touch area */
+  .grid-handle {
+    min-width: 20px;
+    min-height: 20px;
+  }
+  
+  .grid-handle-h {
+    width: 8px !important;
+  }
+  
+  .grid-handle-v {
+    height: 8px !important;
+  }
+}
+
+/* Safe area for mobile devices with notch */
+@supports (padding: max(0px)) {
+  .safe-area-top {
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+  
+  .safe-area-bottom {
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Prevent pull-to-refresh on mobile */
+html, body {
+  overscroll-behavior-y: contain;
+}
+
+/* Mobile viewport height fix */
+@supports (height: 100dvh) {
+  .min-h-screen {
+    min-height: 100dvh;
+  }
+}

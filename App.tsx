@@ -598,7 +598,7 @@ const App: React.FC = () => {
     }
   };
 
-  // グリッド線のドラッグ処理
+  // グリッド線のドラッグ処理（マウス・タッチ共通）
   const handleLineMouseDown = (type: 'col' | 'row', index: number) => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -608,7 +608,52 @@ const App: React.FC = () => {
     setUseCustomLines(true);
   };
 
+  const handleLineTouchStart = (type: 'col' | 'row', index: number) => (e: React.TouchEvent) => {
+    e.stopPropagation();
+    saveGridHistory();
+    setDraggingLine({ type, index });
+    setUseCustomLines(true);
+  };
+
+  // マウス・タッチ共通の座標処理
+  const handleLineDrag = useCallback((clientX: number, clientY: number) => {
+    if (!draggingLine || !previewRef.current || !imageRef.current) return;
+    
+    const rect = imageRef.current.getBoundingClientRect();
+    
+    if (draggingLine.type === 'col') {
+      const x = (clientX - rect.left) / rect.width;
+      const clampedX = Math.max(0.05, Math.min(0.95, x));
+      
+      setColLines(prev => {
+        const newLines = [...prev];
+        newLines[draggingLine.index] = clampedX;
+        return newLines.sort((a, b) => a - b);
+      });
+    } else {
+      const y = (clientY - rect.top) / rect.height;
+      const clampedY = Math.max(0.05, Math.min(0.95, y));
+      
+      setRowLines(prev => {
+        const newLines = [...prev];
+        newLines[draggingLine.index] = clampedY;
+        return newLines.sort((a, b) => a - b);
+      });
+    }
+  }, [draggingLine]);
+
   const handleLineMouseMove = useCallback((e: MouseEvent) => {
+    handleLineDrag(e.clientX, e.clientY);
+  }, [handleLineDrag]);
+
+  const handleLineTouchMove = useCallback((e: TouchEvent) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      handleLineDrag(touch.clientX, touch.clientY);
+    }
+  }, [handleLineDrag]);
+
+  const handleLineMouseMoveOld = useCallback((e: MouseEvent) => {
     if (!draggingLine || !previewRef.current || !imageRef.current) return;
     
     const rect = imageRef.current.getBoundingClientRect();
@@ -646,12 +691,16 @@ const App: React.FC = () => {
     if (draggingLine) {
       window.addEventListener('mousemove', handleLineMouseMove);
       window.addEventListener('mouseup', handleLineMouseUp);
+      window.addEventListener('touchmove', handleLineTouchMove, { passive: false });
+      window.addEventListener('touchend', handleLineMouseUp);
       return () => {
         window.removeEventListener('mousemove', handleLineMouseMove);
         window.removeEventListener('mouseup', handleLineMouseUp);
+        window.removeEventListener('touchmove', handleLineTouchMove);
+        window.removeEventListener('touchend', handleLineMouseUp);
       };
     }
-  }, [draggingLine, handleLineMouseMove, handleLineMouseUp]);
+  }, [draggingLine, handleLineMouseMove, handleLineMouseUp, handleLineTouchMove]);
 
   // グリッド線をリセット
   const resetGridLines = useCallback(() => {
@@ -666,12 +715,21 @@ const App: React.FC = () => {
     }
   }, [saveGridHistory, useCustomLines, initializeGridLines, layout.cols, layout.rows, uploadedImage, trim, gap, updateStickers]);
 
-  // プレビューのスクロール/パン（ドラッグで移動）
+  // プレビューのスクロール/パン（ドラッグ・タッチで移動）
   const handlePreviewMouseDown = (e: React.MouseEvent) => {
     if (draggingLine) return;
     e.preventDefault();
     setIsPanning(true);
     setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+  };
+
+  const handlePreviewTouchStart = (e: React.TouchEvent) => {
+    if (draggingLine) return;
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      setIsPanning(true);
+      setPanStart({ x: touch.clientX - panOffset.x, y: touch.clientY - panOffset.y });
+    }
   };
 
   // ホイールでズーム
@@ -689,6 +747,16 @@ const App: React.FC = () => {
     });
   }, [isPanning, panStart]);
 
+  const handlePanTouchMove = useCallback((e: TouchEvent) => {
+    if (!isPanning || e.touches.length !== 1) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    setPanOffset({
+      x: touch.clientX - panStart.x,
+      y: touch.clientY - panStart.y
+    });
+  }, [isPanning, panStart]);
+
   const handlePanMouseUp = useCallback(() => {
     setIsPanning(false);
   }, []);
@@ -697,12 +765,16 @@ const App: React.FC = () => {
     if (isPanning) {
       window.addEventListener('mousemove', handlePanMouseMove);
       window.addEventListener('mouseup', handlePanMouseUp);
+      window.addEventListener('touchmove', handlePanTouchMove, { passive: false });
+      window.addEventListener('touchend', handlePanMouseUp);
       return () => {
         window.removeEventListener('mousemove', handlePanMouseMove);
         window.removeEventListener('mouseup', handlePanMouseUp);
+        window.removeEventListener('touchmove', handlePanTouchMove);
+        window.removeEventListener('touchend', handlePanMouseUp);
       };
     }
-  }, [isPanning, handlePanMouseMove, handlePanMouseUp]);
+  }, [isPanning, handlePanMouseMove, handlePanMouseUp, handlePanTouchMove]);
 
   // ズームリセット時にパンもリセット
   const handleResetView = () => {
@@ -718,21 +790,27 @@ const App: React.FC = () => {
     setGridEditorPanStart({ x: e.clientX - gridEditorPan.x, y: e.clientY - gridEditorPan.y });
   };
 
-  // グリッドエディターのパン移動（統合ハンドラ）
-  const handleGridEditorGlobalMouseMove = useCallback((e: MouseEvent) => {
-    // ライン移動処理
+  const handleGridEditorTouchStart = (e: React.TouchEvent) => {
+    if (draggingLineGrid) return;
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      setIsGridEditorPanning(true);
+      setGridEditorPanStart({ x: touch.clientX - gridEditorPan.x, y: touch.clientY - gridEditorPan.y });
+    }
+  };
+
+  // グリッドエディターのライン/パン移動（共通座標処理）
+  const handleGridEditorDrag = useCallback((clientX: number, clientY: number) => {
     if (draggingLineGrid && gridEditorImageRef.current) {
       const rect = gridEditorImageRef.current.getBoundingClientRect();
       
-      // トリミング領域の境界を計算
       const trimmedLeft = rect.left + rect.width * trim.left;
       const trimmedTop = rect.top + rect.height * trim.top;
       const trimmedWidth = rect.width * (1 - trim.left - trim.right);
       const trimmedHeight = rect.height * (1 - trim.top - trim.bottom);
       
       if (draggingLineGrid.type === 'col') {
-        // トリミング領域内での相対位置を計算
-        const x = (e.clientX - trimmedLeft) / trimmedWidth;
+        const x = (clientX - trimmedLeft) / trimmedWidth;
         const clampedX = Math.max(0.02, Math.min(0.98, x));
         
         setColLines(prev => {
@@ -744,8 +822,7 @@ const App: React.FC = () => {
           return newLines.sort((a, b) => a - b);
         });
       } else {
-        // トリミング領域内での相対位置を計算
-        const y = (e.clientY - trimmedTop) / trimmedHeight;
+        const y = (clientY - trimmedTop) / trimmedHeight;
         const clampedY = Math.max(0.02, Math.min(0.98, y));
         
         setRowLines(prev => {
@@ -760,14 +837,25 @@ const App: React.FC = () => {
       return;
     }
     
-    // パン移動処理
     if (isGridEditorPanning) {
       setGridEditorPan({
-        x: e.clientX - gridEditorPanStart.x,
-        y: e.clientY - gridEditorPanStart.y
+        x: clientX - gridEditorPanStart.x,
+        y: clientY - gridEditorPanStart.y
       });
     }
   }, [draggingLineGrid, isGridEditorPanning, gridEditorPanStart, trim]);
+
+  const handleGridEditorGlobalMouseMove = useCallback((e: MouseEvent) => {
+    handleGridEditorDrag(e.clientX, e.clientY);
+  }, [handleGridEditorDrag]);
+
+  const handleGridEditorGlobalTouchMove = useCallback((e: TouchEvent) => {
+    if (e.touches.length === 1) {
+      e.preventDefault();
+      const touch = e.touches[0];
+      handleGridEditorDrag(touch.clientX, touch.clientY);
+    }
+  }, [handleGridEditorDrag]);
 
   const handleGridEditorGlobalMouseUp = useCallback(() => {
     setIsGridEditorPanning(false);
@@ -778,12 +866,16 @@ const App: React.FC = () => {
     if (showGridEditor && (isGridEditorPanning || draggingLineGrid)) {
       window.addEventListener('mousemove', handleGridEditorGlobalMouseMove);
       window.addEventListener('mouseup', handleGridEditorGlobalMouseUp);
+      window.addEventListener('touchmove', handleGridEditorGlobalTouchMove, { passive: false });
+      window.addEventListener('touchend', handleGridEditorGlobalMouseUp);
       return () => {
         window.removeEventListener('mousemove', handleGridEditorGlobalMouseMove);
         window.removeEventListener('mouseup', handleGridEditorGlobalMouseUp);
+        window.removeEventListener('touchmove', handleGridEditorGlobalTouchMove);
+        window.removeEventListener('touchend', handleGridEditorGlobalMouseUp);
       };
     }
-  }, [showGridEditor, isGridEditorPanning, draggingLineGrid, handleGridEditorGlobalMouseMove, handleGridEditorGlobalMouseUp]);
+  }, [showGridEditor, isGridEditorPanning, draggingLineGrid, handleGridEditorGlobalMouseMove, handleGridEditorGlobalMouseUp, handleGridEditorGlobalTouchMove]);
 
   const handleGridEditorWheel = (e: React.WheelEvent) => {
     e.preventDefault();
@@ -791,11 +883,17 @@ const App: React.FC = () => {
     setGridEditorZoom(prev => Math.min(Math.max(0.3, prev + delta), 5));
   };
 
-  // グリッドエディターでのライン移動開始
+  // グリッドエディターでのライン移動開始（マウス・タッチ共通）
   const handleGridEditorLineMouseDown = (type: 'col' | 'row', index: number) => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // ドラッグ開始時に履歴を保存
+    saveGridHistory();
+    setDraggingLineGrid({ type, index });
+    setUseCustomLines(true);
+  };
+
+  const handleGridEditorLineTouchStart = (type: 'col' | 'row', index: number) => (e: React.TouchEvent) => {
+    e.stopPropagation();
     saveGridHistory();
     setDraggingLineGrid({ type, index });
     setUseCustomLines(true);
@@ -1084,9 +1182,9 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 overflow-hidden flex flex-col lg:flex-row animate-fade-in">
         {/* Left Panel - Settings */}
-        <div className="w-full lg:w-[480px] bg-white border-r border-gray-100 flex flex-col h-[60vh] lg:h-[calc(100vh-64px)] shrink-0 shadow-premium z-20 animate-slide-in-left">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="font-bold text-gray-900 flex items-center gap-2">
+        <div className="w-full lg:w-[480px] bg-white border-r border-gray-100 flex flex-col h-[50vh] sm:h-[55vh] lg:h-[calc(100vh-64px)] shrink-0 shadow-premium z-20 animate-slide-in-left">
+          <div className="p-3 sm:p-5 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="font-bold text-gray-900 flex items-center gap-2 text-sm sm:text-base">
               <Settings size={18} className="text-[#06C755]" />
               グリッド設定
             </h3>
@@ -1096,30 +1194,31 @@ const App: React.FC = () => {
                   カスタム
                 </span>
               )}
-              <button onClick={handleSwapDimensions} className="text-xs font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors border border-gray-200 hover:border-[#06C755] hover:text-[#06C755]">
-                <RefreshCw size={12} /> 縦横入替
+              <button onClick={handleSwapDimensions} className="text-xs font-semibold flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg transition-colors border border-gray-200 hover:border-[#06C755] hover:text-[#06C755] active:bg-[#E8F8EE]">
+                <RefreshCw size={12} /> <span className="hidden sm:inline">縦横入替</span><span className="sm:hidden">入替</span>
               </button>
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-5 space-y-6 scrollbar-premium">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-4 sm:space-y-6 scrollbar-premium">
             {/* Preview with Draggable Grid Lines */}
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
                   <Eye size={12} /> プレビュー
                 </label>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => handleZoom(-0.25)} className="p-1.5 bg-gray-100 rounded-lg text-gray-500 hover:text-[#06C755] hover:bg-[#E8F8EE] transition-colors"><ZoomOut size={14}/></button>
-                  <button onClick={handleResetView} className="px-2 py-1 bg-gray-100 rounded-lg text-xs font-bold text-gray-600 hover:bg-[#E8F8EE] hover:text-[#06C755] transition-colors">{Math.round(zoomLevel*100)}%</button>
-                  <button onClick={() => handleZoom(0.25)} className="p-1.5 bg-gray-100 rounded-lg text-gray-500 hover:text-[#06C755] hover:bg-[#E8F8EE] transition-colors"><ZoomIn size={14}/></button>
+                  <button onClick={() => handleZoom(-0.25)} className="p-2 sm:p-1.5 bg-gray-100 rounded-lg text-gray-500 hover:text-[#06C755] hover:bg-[#E8F8EE] active:bg-[#06C755] active:text-white transition-colors"><ZoomOut size={14}/></button>
+                  <button onClick={handleResetView} className="px-2 py-1.5 sm:py-1 bg-gray-100 rounded-lg text-xs font-bold text-gray-600 hover:bg-[#E8F8EE] hover:text-[#06C755] transition-colors min-w-[48px]">{Math.round(zoomLevel*100)}%</button>
+                  <button onClick={() => handleZoom(0.25)} className="p-2 sm:p-1.5 bg-gray-100 rounded-lg text-gray-500 hover:text-[#06C755] hover:bg-[#E8F8EE] active:bg-[#06C755] active:text-white transition-colors"><ZoomIn size={14}/></button>
                 </div>
               </div>
               
               <div 
                 ref={previewRef}
-                className={`relative overflow-hidden bg-gray-100 rounded-2xl border border-gray-200 h-[200px] flex items-center justify-center ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+                className={`relative overflow-hidden bg-gray-100 rounded-2xl border border-gray-200 h-[160px] sm:h-[200px] flex items-center justify-center touch-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
                 onMouseDown={handlePreviewMouseDown}
+                onTouchStart={handlePreviewTouchStart}
                 onWheel={handlePreviewWheel}
               >
                 <div 
@@ -1134,7 +1233,8 @@ const App: React.FC = () => {
                       ref={imageRef}
                       src={uploadedImage} 
                       alt="Source" 
-                      className="max-w-[320px] max-h-[180px] w-auto h-auto block"
+                      className="max-w-[280px] sm:max-w-[320px] max-h-[140px] sm:max-h-[180px] w-auto h-auto block"
+                      draggable={false}
                     />
                     
                     {/* Trim Overlay - トリミング範囲外を暗く */}
@@ -1395,11 +1495,11 @@ const App: React.FC = () => {
         </div>
 
         {/* Right Panel - Stickers */}
-        <div className="flex-1 flex flex-col h-[40vh] lg:h-[calc(100vh-64px)] overflow-hidden relative animate-slide-in-right">
+        <div className="flex-1 flex flex-col h-[50vh] sm:h-[45vh] lg:h-[calc(100vh-64px)] overflow-hidden relative animate-slide-in-right">
           {/* Processing Overlay */}
           {isProcessing && (
             <div className="absolute inset-0 glass z-50 flex items-center justify-center">
-              <div className="flex flex-col items-center gap-4 p-8 bg-white rounded-2xl shadow-premium-lg animate-scale-in">
+              <div className="flex flex-col items-center gap-4 p-4 sm:p-8 bg-white rounded-2xl shadow-premium-lg animate-scale-in">
                 <div className="spinner" />
                 <span className="font-bold text-gray-600 text-sm">処理中...</span>
               </div>
@@ -1407,76 +1507,95 @@ const App: React.FC = () => {
           )}
 
           {/* Header */}
-          <div className="px-6 py-4 bg-white border-b border-gray-100 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg gradient-line flex items-center justify-center">
-                <Layers size={16} className="text-white" />
+          <div className="px-3 sm:px-6 py-3 sm:py-4 bg-white border-b border-gray-100 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg gradient-line flex items-center justify-center">
+                <Layers size={14} className="text-white sm:w-4 sm:h-4" />
               </div>
               <div>
-                <h3 className="font-bold text-gray-900">スタンプ一覧</h3>
-                <p className="text-xs text-gray-400">{stickers.length}個のスタンプ</p>
+                <h3 className="font-bold text-gray-900 text-sm sm:text-base">スタンプ一覧</h3>
+                <p className="text-[10px] sm:text-xs text-gray-400">{stickers.length}個のスタンプ</p>
               </div>
             </div>
           </div>
 
           {/* Sticker Grid */}
-          <div className="flex-1 overflow-y-auto p-6 scrollbar-premium">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-6 scrollbar-premium">
             {/* Main Image Card */}
-            <div className="mb-6 card-premium rounded-2xl p-5 flex items-center gap-5 animate-fade-in-up">
-              <div className="relative w-20 h-20 rounded-xl border-2 border-[#06C755] bg-[#E8F8EE] overflow-hidden shrink-0 flex items-center justify-center shadow-line">
+            <div className="mb-4 sm:mb-6 card-premium rounded-xl sm:rounded-2xl p-3 sm:p-5 flex items-center gap-3 sm:gap-5 animate-fade-in-up">
+              <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg sm:rounded-xl border-2 border-[#06C755] bg-[#E8F8EE] overflow-hidden shrink-0 flex items-center justify-center shadow-line">
                 {mainImage ? <img src={mainImage} alt="Main" className="w-full h-full object-contain" /> : <span className="text-xs text-gray-400">なし</span>}
               </div>
-              <div className="space-y-1 flex-1">
+              <div className="space-y-1 flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h4 className="font-bold text-gray-900">メイン画像</h4>
+                  <h4 className="font-bold text-gray-900 text-sm sm:text-base">メイン画像</h4>
                   <span className="px-2 py-0.5 text-[10px] font-bold rounded-full text-white gradient-line">必須</span>
                 </div>
-                <p className="text-xs text-gray-500">ストアに表示されるアイコン (240×240px)</p>
+                <p className="text-[10px] sm:text-xs text-gray-500 truncate">ストアに表示されるアイコン</p>
               </div>
             </div>
 
-            {/* Stickers Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 pb-8">
+            {/* Stickers Grid - モバイルではタップで操作 */}
+            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-4 pb-8">
               {stickers.map((sticker, index) => {
                 const isMain = index === mainImageIndex;
                 return (
                   <div 
                     key={sticker.id} 
-                    className={`sticker-item relative group card-premium rounded-xl overflow-hidden border-2 transition-all duration-300
+                    className={`sticker-item relative group card-premium rounded-lg sm:rounded-xl overflow-hidden border-2 transition-all duration-300
                       ${isMain ? 'border-[#06C755] ring-2 ring-[#06C755]/20' : 'border-transparent hover:border-[#06C755]/50'}`}
                     style={{ animationDelay: `${index * 30}ms` }}
                   >
                     <div className="aspect-[370/320] w-full bg-transparency">
-                      <img src={sticker.dataUrl} alt={`Sticker ${index + 1}`} className="w-full h-full object-contain p-2" />
+                      <img src={sticker.dataUrl} alt={`Sticker ${index + 1}`} className="w-full h-full object-contain p-1 sm:p-2" draggable={false} />
                     </div>
                     
-                    {/* Hover Overlay */}
-                    <div className="absolute inset-0 bg-white/95 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center gap-2 p-3">
+                    {/* PC: Hover Overlay / Mobile: Tap Overlay */}
+                    <div className="absolute inset-0 bg-white/95 opacity-0 group-hover:opacity-100 lg:group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center gap-1 sm:gap-2 p-2 sm:p-3">
                       <button 
                         onClick={() => setEditingStickerId(sticker.id)} 
-                        className="w-full bg-white border-2 border-gray-200 px-3 py-2 rounded-lg text-xs font-bold hover:border-[#06C755] hover:text-[#06C755] transition-all flex items-center justify-center gap-2"
+                        className="w-full bg-white border-2 border-gray-200 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-bold hover:border-[#06C755] hover:text-[#06C755] active:bg-[#E8F8EE] transition-all flex items-center justify-center gap-1 sm:gap-2"
                       >
-                        <Sliders size={14} /> 編集
+                        <Sliders size={12} className="sm:w-3.5 sm:h-3.5" /> 編集
                       </button>
                       <button 
                         onClick={() => handleSetMainImage(index, sticker.dataUrl)} 
-                        className={`w-full px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 text-white
-                          ${isMain ? 'bg-[#05A347]' : 'gradient-line hover:shadow-line'}`}
+                        className={`w-full px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1 sm:gap-2 text-white
+                          ${isMain ? 'bg-[#05A347]' : 'gradient-line hover:shadow-line active:opacity-80'}`}
                       >
-                        {isMain ? <><Check size={14} /> 選択中</> : "メインにする"}
+                        {isMain ? <><Check size={12} className="sm:w-3.5 sm:h-3.5" /> 選択中</> : "メイン"}
                       </button>
                     </div>
 
+                    {/* Mobile: 常に表示される操作ボタン */}
+                    <div className="lg:hidden absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
+                      <div className="flex gap-1">
+                        <button 
+                          onClick={() => setEditingStickerId(sticker.id)} 
+                          className="flex-1 bg-white/90 px-1.5 py-1 rounded text-[9px] font-bold text-gray-700 active:bg-[#E8F8EE] flex items-center justify-center gap-0.5"
+                        >
+                          <Sliders size={10} /> 編集
+                        </button>
+                        <button 
+                          onClick={() => handleSetMainImage(index, sticker.dataUrl)} 
+                          className={`flex-1 px-1.5 py-1 rounded text-[9px] font-bold flex items-center justify-center gap-0.5 text-white
+                            ${isMain ? 'bg-[#05A347]' : 'bg-[#06C755] active:bg-[#05A347]'}`}
+                        >
+                          {isMain ? <Check size={10} /> : "メイン"}
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Number Badge */}
-                    <div className="absolute top-2 left-2 text-[10px] font-bold px-1.5 py-0.5 rounded-md text-white gradient-line shadow-sm">
+                    <div className="absolute top-1 left-1 sm:top-2 sm:left-2 text-[8px] sm:text-[10px] font-bold px-1 sm:px-1.5 py-0.5 rounded-md text-white gradient-line shadow-sm">
                       {String(index + 1).padStart(2, '0')}
                     </div>
                     
                     {/* Main Badge */}
                     {isMain && (
-                      <div className="absolute top-2 right-2">
-                        <div className="w-5 h-5 rounded-full gradient-line flex items-center justify-center shadow-line">
-                          <Check size={12} className="text-white" />
+                      <div className="absolute top-1 right-1 sm:top-2 sm:right-2">
+                        <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full gradient-line flex items-center justify-center shadow-line">
+                          <Check size={10} className="text-white sm:w-3 sm:h-3" />
                         </div>
                       </div>
                     )}
@@ -1665,8 +1784,9 @@ const App: React.FC = () => {
           
           {/* Editor Canvas */}
           <div 
-            className={`flex-1 overflow-hidden relative ${(isGridEditorPanning || draggingLineGrid) ? 'cursor-grabbing' : 'cursor-grab'}`}
+            className={`flex-1 overflow-hidden relative touch-none ${(isGridEditorPanning || draggingLineGrid) ? 'cursor-grabbing' : 'cursor-grab'}`}
             onMouseDown={handleGridEditorMouseDown}
+            onTouchStart={handleGridEditorTouchStart}
             onWheel={handleGridEditorWheel}
           >
             <div 
@@ -1706,31 +1826,33 @@ const App: React.FC = () => {
                     bottom: `${trim.bottom * 100}%`,
                   }}
                 >
-                  {/* Column lines (draggable) */}
+                  {/* Column lines (draggable) - タッチ対応 */}
                   {colLines.map((pos, i) => (
                     <div
                       key={`grid-col-${i}`}
                       className={`absolute top-0 bottom-0 cursor-ew-resize group ${draggingLineGrid?.type === 'col' && draggingLineGrid?.index === i ? 'z-30' : 'z-20'}`}
-                      style={{ left: `${pos * 100}%`, width: '20px', marginLeft: '-10px' }}
+                      style={{ left: `${pos * 100}%`, width: '32px', marginLeft: '-16px' }}
                       onMouseDown={handleGridEditorLineMouseDown('col', i)}
+                      onTouchStart={handleGridEditorLineTouchStart('col', i)}
                     >
                       <div className={`absolute top-0 bottom-0 left-1/2 -translate-x-1/2 transition-all ${draggingLineGrid?.type === 'col' && draggingLineGrid?.index === i ? 'w-1 bg-yellow-400' : 'w-0.5 bg-[#06C755] group-hover:w-1 group-hover:bg-yellow-400'}`} />
-                      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-12 rounded-full flex items-center justify-center transition-all ${draggingLineGrid?.type === 'col' && draggingLineGrid?.index === i ? 'bg-yellow-400 scale-110' : 'bg-[#06C755] group-hover:bg-yellow-400 group-hover:scale-110'}`}>
+                      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-14 sm:w-6 sm:h-12 rounded-full flex items-center justify-center transition-all ${draggingLineGrid?.type === 'col' && draggingLineGrid?.index === i ? 'bg-yellow-400 scale-110' : 'bg-[#06C755] group-hover:bg-yellow-400 group-hover:scale-110'}`}>
                         <GripVertical size={14} className="text-white" />
                       </div>
                     </div>
                   ))}
                   
-                  {/* Row lines (draggable) */}
+                  {/* Row lines (draggable) - タッチ対応 */}
                   {rowLines.map((pos, i) => (
                     <div
                       key={`grid-row-${i}`}
                       className={`absolute left-0 right-0 cursor-ns-resize group ${draggingLineGrid?.type === 'row' && draggingLineGrid?.index === i ? 'z-30' : 'z-20'}`}
-                      style={{ top: `${pos * 100}%`, height: '20px', marginTop: '-10px' }}
+                      style={{ top: `${pos * 100}%`, height: '32px', marginTop: '-16px' }}
                       onMouseDown={handleGridEditorLineMouseDown('row', i)}
+                      onTouchStart={handleGridEditorLineTouchStart('row', i)}
                     >
                       <div className={`absolute left-0 right-0 top-1/2 -translate-y-1/2 transition-all ${draggingLineGrid?.type === 'row' && draggingLineGrid?.index === i ? 'h-1 bg-yellow-400' : 'h-0.5 bg-[#06C755] group-hover:h-1 group-hover:bg-yellow-400'}`} />
-                      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-6 rounded-full flex items-center justify-center transition-all ${draggingLineGrid?.type === 'row' && draggingLineGrid?.index === i ? 'bg-yellow-400 scale-110' : 'bg-[#06C755] group-hover:bg-yellow-400 group-hover:scale-110'}`}>
+                      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-8 sm:w-12 sm:h-6 rounded-full flex items-center justify-center transition-all ${draggingLineGrid?.type === 'row' && draggingLineGrid?.index === i ? 'bg-yellow-400 scale-110' : 'bg-[#06C755] group-hover:bg-yellow-400 group-hover:scale-110'}`}>
                         <GripVertical size={14} className="text-white rotate-90" />
                       </div>
                     </div>
