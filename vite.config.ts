@@ -3,7 +3,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  base: '/line-stamp-cutter-web/',
+  // Cloudflare Pages: '/' / GitHub Pages: '/line-stamp-cutter-web/'
+  base: process.env.CF_PAGES ? '/' : '/line-stamp-cutter-web/',
   server: {
     port: 3000,
     host: 'localhost',
