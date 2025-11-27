@@ -184,8 +184,8 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
 
     const { x, y } = getCanvasCoordinates(e);
     
-    // プレビュー位置を更新
-    if (activeTool === 'wand') {
+    // プレビュー位置を更新（wand と eraser の両方で）
+    if (activeTool === 'wand' || activeTool === 'eraser') {
       setPreviewPos({ x, y });
     }
 
@@ -542,12 +542,14 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
                {/* 消しゴムカーソルプレビュー */}
                {activeTool === 'eraser' && previewPos && (
                  <div
-                   className="absolute pointer-events-none border-2 border-white rounded-full mix-blend-difference"
+                   className="absolute pointer-events-none rounded-full"
                    style={{
                      width: brushSize,
                      height: brushSize,
                      left: previewPos.x - brushSize / 2,
                      top: previewPos.y - brushSize / 2,
+                     border: '2px solid white',
+                     boxShadow: '0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.3)',
                    }}
                  />
                )}
