@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Loader2, Wand2, Save, Eraser, RotateCcw, Sparkles, ZoomIn, ZoomOut, Palette, Move, MousePointer2, Crosshair } from 'lucide-react';
+import { X, Loader2, Wand2, Save, Eraser, RotateCcw, Sparkles, ZoomIn, ZoomOut, Palette, Move, MousePointer2, Crosshair, Paintbrush, PaintBucket, Pipette } from 'lucide-react';
 import { eraseOnCanvas, advancedBackgroundRemoval, autoRemoveBackground } from '../utils/imageProcessing';
 
 interface EditorModalProps {
@@ -15,6 +15,84 @@ const bgColors = [
   { name: 'グリーン', value: '#00B140', pattern: false },
   { name: 'マゼンタ', value: '#FF00FF', pattern: false },
   { name: 'ブルー', value: '#0066FF', pattern: false },
+];
+
+// 256色カラーパレットを生成（色相順グラデーション）
+const generateColorPalette = (): string[] => {
+  const colors: string[] = [];
+  
+  // 1行目: グレースケール (16色)
+  for (let i = 0; i < 16; i++) {
+    const v = Math.round((i / 15) * 255);
+    colors.push(`#${v.toString(16).padStart(2, '0').repeat(3)}`);
+  }
+  
+  // 2-15行目: 色相環に沿ったグラデーション (14行 × 16色 = 224色)
+  // 各行は同じ色相で明度・彩度が変化
+  const hueSteps = 16; // 16色相
+  const saturationLevels = [100, 75, 50]; // 彩度レベル
+  const lightnessLevels = [25, 40, 50, 60, 75]; // 明度レベル
+  
+  // HSLからRGBに変換
+  const hslToRgb = (h: number, s: number, l: number): [number, number, number] => {
+    s /= 100;
+    l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [
+      Math.round((r + m) * 255),
+      Math.round((g + m) * 255),
+      Math.round((b + m) * 255)
+    ];
+  };
+  
+  // 色相ごとに行を作成
+  for (const saturation of saturationLevels) {
+    for (const lightness of lightnessLevels) {
+      for (let i = 0; i < hueSteps; i++) {
+        const hue = (i / hueSteps) * 360;
+        const [r, g, b] = hslToRgb(hue, saturation, lightness);
+        const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+        if (!colors.includes(hex)) {
+          colors.push(hex);
+        }
+      }
+    }
+  }
+  
+  // 追加の肌色・茶色系
+  const skinTones = [
+    '#FFE4C4', '#FFDAB9', '#FFE5B4', '#F5DEB3', '#DEB887',
+    '#D2B48C', '#C4A484', '#8B7355', '#8B4513', '#A0522D',
+    '#FFCCAA', '#FFBB99', '#EEAA88', '#DD9977', '#CC8866',
+    '#BB7755'
+  ];
+  skinTones.forEach(c => {
+    if (!colors.includes(c) && colors.length < 256) colors.push(c);
+  });
+  
+  // 256色になるまで調整
+  while (colors.length < 256) {
+    colors.push('#808080');
+  }
+  
+  return colors.slice(0, 256);
+};
+
+const colorPalette = generateColorPalette();
+
+// よく使う色（上部に表示）
+const frequentColors = [
+  '#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00',
+  '#FF00FF', '#00FFFF', '#FF8800', '#8800FF', '#FFE4C4', '#8B4513'
 ];
 
 // ツールチップコンポーネント
@@ -36,8 +114,11 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
   
   const [history, setHistory] = useState<string[]>([]);
   
-  // ツール: 'pan', 'auto', 'wand', 'eraser'
-  const [activeTool, setActiveTool] = useState<'pan' | 'auto' | 'wand' | 'eraser'>('auto');
+  // ツール: 'pan', 'auto', 'wand', 'eraser', 'brush', 'bucket', 'eyedropper'
+  const [activeTool, setActiveTool] = useState<'pan' | 'auto' | 'wand' | 'eraser' | 'brush' | 'bucket' | 'eyedropper'>('auto');
+  
+  // ブラシカラー
+  const [brushColor, setBrushColor] = useState('#FFFFFF');
 
   // 設定
   const [tolerance, setTolerance] = useState(25);
@@ -176,6 +257,14 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
       setIsDrawing(false);
     } else if (activeTool === 'eraser') {
       handleBrush(x, y);
+    } else if (activeTool === 'brush') {
+      handleColorBrush(x, y);
+    } else if (activeTool === 'bucket') {
+      handleBucketFill(x, y);
+      setIsDrawing(false);
+    } else if (activeTool === 'eyedropper') {
+      handleEyedropper(x, y);
+      setIsDrawing(false);
     }
   };
 
@@ -184,8 +273,8 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
 
     const { x, y } = getCanvasCoordinates(e);
     
-    // プレビュー位置を更新（wand と eraser の両方で）
-    if (activeTool === 'wand' || activeTool === 'eraser') {
+    // プレビュー位置を更新（wand, eraser, brush, bucket, eyedropper で）
+    if (activeTool === 'wand' || activeTool === 'eraser' || activeTool === 'brush' || activeTool === 'bucket' || activeTool === 'eyedropper') {
       setPreviewPos({ x, y });
     }
 
@@ -193,11 +282,13 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
     
     if (activeTool === 'eraser') {
       handleBrush(x, y);
+    } else if (activeTool === 'brush') {
+      handleColorBrush(x, y);
     }
   };
 
   const handleMouseUp = () => {
-    if (isDrawing && activeTool === 'eraser') {
+    if (isDrawing && (activeTool === 'eraser' || activeTool === 'brush')) {
       saveToHistory();
     }
     setIsDrawing(false);
@@ -278,6 +369,187 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
     eraseOnCanvas(canvas, x, y, brushSize / 2);
   };
 
+  // 色塗りブラシ
+  const handleColorBrush = (x: number, y: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = brushColor;
+    ctx.beginPath();
+    ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  };
+
+  // バケツ塗りつぶし（Flood Fill）
+  const handleBucketFill = (startX: number, startY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    setIsProcessing(true);
+    setLastMessage('塗りつぶし中...');
+
+    setTimeout(() => {
+      try {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        const x = Math.floor(startX);
+        const y = Math.floor(startY);
+
+        if (x < 0 || x >= width || y < 0 || y >= height) {
+          setIsProcessing(false);
+          return;
+        }
+
+        // 塗りつぶし色をRGBAに変換
+        const fillColor = {
+          r: parseInt(brushColor.slice(1, 3), 16),
+          g: parseInt(brushColor.slice(3, 5), 16),
+          b: parseInt(brushColor.slice(5, 7), 16),
+          a: 255
+        };
+
+        // クリック位置の色を取得
+        const startIdx = (y * width + x) * 4;
+        const targetColor = {
+          r: data[startIdx],
+          g: data[startIdx + 1],
+          b: data[startIdx + 2],
+          a: data[startIdx + 3]
+        };
+
+        // 同じ色なら何もしない
+        if (targetColor.r === fillColor.r && targetColor.g === fillColor.g && 
+            targetColor.b === fillColor.b && targetColor.a === fillColor.a) {
+          setIsProcessing(false);
+          setLastMessage('同じ色です');
+          return;
+        }
+
+        // 色が一致するかチェック（許容値を使用）
+        const colorMatch = (idx: number) => {
+          const dr = Math.abs(data[idx] - targetColor.r);
+          const dg = Math.abs(data[idx + 1] - targetColor.g);
+          const db = Math.abs(data[idx + 2] - targetColor.b);
+          const da = Math.abs(data[idx + 3] - targetColor.a);
+          return dr <= tolerance && dg <= tolerance && db <= tolerance && da <= tolerance;
+        };
+
+        // Flood Fill アルゴリズム（スキャンライン方式）
+        const visited = new Uint8Array(width * height);
+        const stack: [number, number][] = [[x, y]];
+
+        while (stack.length > 0) {
+          const [cx, cy] = stack.pop()!;
+          
+          if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
+          
+          const idx = cy * width + cx;
+          if (visited[idx]) continue;
+          
+          const pixelIdx = idx * 4;
+          if (!colorMatch(pixelIdx)) continue;
+
+          // 左端を見つける
+          let leftX = cx;
+          while (leftX > 0) {
+            const leftIdx = (cy * width + (leftX - 1)) * 4;
+            if (!colorMatch(leftIdx) || visited[cy * width + (leftX - 1)]) break;
+            leftX--;
+          }
+
+          // 右端まで塗りつぶし
+          let rightX = leftX;
+          let spanAbove = false;
+          let spanBelow = false;
+
+          while (rightX < width) {
+            const currentIdx = cy * width + rightX;
+            const currentPixelIdx = currentIdx * 4;
+            
+            if (visited[currentIdx] || !colorMatch(currentPixelIdx)) break;
+
+            // 塗りつぶし
+            data[currentPixelIdx] = fillColor.r;
+            data[currentPixelIdx + 1] = fillColor.g;
+            data[currentPixelIdx + 2] = fillColor.b;
+            data[currentPixelIdx + 3] = fillColor.a;
+            visited[currentIdx] = 1;
+
+            // 上の行をチェック
+            if (cy > 0) {
+              const aboveIdx = ((cy - 1) * width + rightX) * 4;
+              if (colorMatch(aboveIdx) && !visited[(cy - 1) * width + rightX]) {
+                if (!spanAbove) {
+                  stack.push([rightX, cy - 1]);
+                  spanAbove = true;
+                }
+              } else {
+                spanAbove = false;
+              }
+            }
+
+            // 下の行をチェック
+            if (cy < height - 1) {
+              const belowIdx = ((cy + 1) * width + rightX) * 4;
+              if (colorMatch(belowIdx) && !visited[(cy + 1) * width + rightX]) {
+                if (!spanBelow) {
+                  stack.push([rightX, cy + 1]);
+                  spanBelow = true;
+                }
+              } else {
+                spanBelow = false;
+              }
+            }
+
+            rightX++;
+          }
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        saveToHistory();
+        setLastMessage('✓ 塗りつぶし完了');
+      } catch (error) {
+        setLastMessage('エラーが発生しました');
+      }
+      setIsProcessing(false);
+    }, 10);
+  };
+
+  // スポイト（色を取得）
+  const handleEyedropper = (x: number, y: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const px = Math.floor(x);
+    const py = Math.floor(y);
+    
+    if (px < 0 || px >= canvas.width || py < 0 || py >= canvas.height) return;
+
+    const imageData = ctx.getImageData(px, py, 1, 1);
+    const [r, g, b, a] = imageData.data;
+    
+    if (a === 0) {
+      setLastMessage('透明なピクセルです');
+      return;
+    }
+    
+    const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
+    setBrushColor(hex);
+    setLastMessage(`✓ 色を取得: ${hex}`);
+  };
+
   const handleSave = () => {
     if (canvasRef.current) {
       onSave(canvasRef.current.toDataURL('image/png', 1.0));
@@ -330,6 +602,12 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
       } else if (e.key === '3') {
         setActiveTool('eraser');
       } else if (e.key === '4') {
+        setActiveTool('brush');
+      } else if (e.key === '5') {
+        setActiveTool('bucket');
+      } else if (e.key === '6') {
+        setActiveTool('eyedropper');
+      } else if (e.key === '7') {
         setActiveTool('pan');
       }
     };
@@ -359,6 +637,9 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
       case 'auto': return 'pointer';
       case 'wand': return 'crosshair';
       case 'eraser': return 'none';
+      case 'brush': return 'none';
+      case 'bucket': return 'crosshair';
+      case 'eyedropper': return 'crosshair';
       default: return 'default';
     }
   };
@@ -375,7 +656,7 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-bold text-white">背景透過エディタ</h2>
-              <p className="text-[9px] sm:text-[10px] text-gray-500 hidden sm:block">Space: 移動 / 1-4: ツール切替 / Cmd+Z: 戻る</p>
+              <p className="text-[9px] sm:text-[10px] text-gray-500 hidden sm:block">Space: 移動 / 1-7: ツール切替 / Cmd+Z: 戻る</p>
             </div>
             
             {lastMessage && (
@@ -434,7 +715,34 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
               </button>
             </Tooltip>
 
-            <Tooltip text="移動" subtext="ドラッグで画像を移動 [4/Space]">
+            <Tooltip text="塗りブラシ" subtext="透過した部分を塗り戻す [4]">
+              <button 
+                onClick={() => setActiveTool('brush')}
+                className={`p-2 sm:p-3 rounded-xl transition-all ${activeTool === 'brush' ? 'bg-[#06C755] text-white shadow-lg shadow-[#06C755]/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+              >
+                <Paintbrush size={18} />
+              </button>
+            </Tooltip>
+
+            <Tooltip text="バケツ" subtext="クリック位置を塗りつぶし [5]">
+              <button 
+                onClick={() => setActiveTool('bucket')}
+                className={`p-2 sm:p-3 rounded-xl transition-all ${activeTool === 'bucket' ? 'bg-[#06C755] text-white shadow-lg shadow-[#06C755]/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+              >
+                <PaintBucket size={18} />
+              </button>
+            </Tooltip>
+
+            <Tooltip text="スポイト" subtext="画像から色を取得 [6]">
+              <button 
+                onClick={() => setActiveTool('eyedropper')}
+                className={`p-2 sm:p-3 rounded-xl transition-all ${activeTool === 'eyedropper' ? 'bg-[#06C755] text-white shadow-lg shadow-[#06C755]/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+              >
+                <Pipette size={18} />
+              </button>
+            </Tooltip>
+
+            <Tooltip text="移動" subtext="ドラッグで画像を移動 [7/Space]">
               <button 
                 onClick={() => setActiveTool('pan')}
                 className={`p-2 sm:p-3 rounded-xl transition-all ${activeTool === 'pan' ? 'bg-[#06C755] text-white shadow-lg shadow-[#06C755]/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
@@ -553,6 +861,23 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
                    }}
                  />
                )}
+
+               {/* 塗りブラシカーソルプレビュー */}
+               {activeTool === 'brush' && previewPos && (
+                 <div
+                   className="absolute pointer-events-none rounded-full"
+                   style={{
+                     width: brushSize,
+                     height: brushSize,
+                     left: previewPos.x - brushSize / 2,
+                     top: previewPos.y - brushSize / 2,
+                     backgroundColor: brushColor,
+                     opacity: 0.7,
+                     border: '2px solid white',
+                     boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
+                   }}
+                 />
+               )}
              </div>
              
              {isProcessing && (
@@ -582,20 +907,26 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
               <h3 className="text-sm font-bold text-white mb-1">
                 {activeTool === 'auto' ? '🔮 自動背景除去' : 
                  activeTool === 'wand' ? '🪄 クリック透過' : 
-                 activeTool === 'eraser' ? '🧹 消しゴム' : '✋ 移動'}
+                 activeTool === 'eraser' ? '🧹 消しゴム' : 
+                 activeTool === 'brush' ? '🖌️ 塗りブラシ' :
+                 activeTool === 'bucket' ? '🪣 バケツ' :
+                 activeTool === 'eyedropper' ? '💧 スポイト' : '✋ 移動'}
               </h3>
               <p className="text-[10px] text-gray-500">
                 {activeTool === 'auto' ? '画像の境界から背景色を自動検出して除去します' : 
                  activeTool === 'wand' ? 'クリックした位置の色と類似色を透過します' : 
                  activeTool === 'eraser' ? 'ドラッグで任意の部分を消去できます' :
+                 activeTool === 'brush' ? '透過しすぎた部分を塗り戻せます' :
+                 activeTool === 'bucket' ? 'クリックした範囲を一度に塗りつぶします' :
+                 activeTool === 'eyedropper' ? '画像から色を取得してブラシ色に設定します' :
                  'ドラッグで画像を移動できます'}
               </p>
             </div>
              
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               
-              {/* 許容値 - pan以外で表示 */}
-              {activeTool !== 'pan' && activeTool !== 'eraser' && (
+              {/* 許容値 - pan, eraser, brush 以外で表示 */}
+              {activeTool !== 'pan' && activeTool !== 'eraser' && activeTool !== 'brush' && (
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <label className="text-xs font-bold text-gray-400">許容値</label>
@@ -636,6 +967,169 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
                     <span>大きい</span>
                   </div>
                 </div>
+              )}
+
+              {/* 塗りブラシ設定 */}
+              {activeTool === 'brush' && (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-gray-400">塗り色</label>
+                      <div 
+                        className="w-6 h-6 rounded border-2 border-gray-600"
+                        style={{ backgroundColor: brushColor }}
+                        title={`現在の色: ${brushColor}`}
+                      />
+                    </div>
+                    {/* よく使う色 */}
+                    <div className="grid grid-cols-6 gap-1">
+                      {frequentColors.map((color) => (
+                        <button
+                          key={`freq-${color}`}
+                          onClick={() => setBrushColor(color)}
+                          className={`w-full aspect-square rounded border transition-all ${
+                            brushColor === color 
+                              ? 'border-[#06C755] ring-1 ring-[#06C755]/50 scale-110 z-10' 
+                              : 'border-gray-700 hover:border-gray-500'
+                          }`}
+                          style={{ backgroundColor: color }}
+                          title={color}
+                        />
+                      ))}
+                    </div>
+                    {/* 256色パレット */}
+                    <div className="max-h-32 overflow-y-auto rounded-lg bg-gray-900/50 p-1 border border-gray-800">
+                      <div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(16, 1fr)' }}>
+                        {colorPalette.map((color, idx) => (
+                          <button
+                            key={`palette-${idx}`}
+                            onClick={() => setBrushColor(color)}
+                            className={`w-3 h-3 transition-all ${
+                              brushColor === color 
+                                ? 'ring-1 ring-[#06C755] ring-offset-1 ring-offset-gray-900 z-10' 
+                                : 'hover:scale-125'
+                            }`}
+                            style={{ backgroundColor: color }}
+                            title={color}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-gray-600 text-center">スクロールで256色から選択</p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-gray-400">ブラシサイズ</label>
+                      <span className="text-xs text-white font-bold bg-gray-800 px-2 py-0.5 rounded">{brushSize}px</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="5" 
+                      max="100" 
+                      value={brushSize} 
+                      onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                      className="w-full accent-[#06C755]"
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-600">
+                      <span>細かい</span>
+                      <span>大きい</span>
+                    </div>
+                  </div>
+                  <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/80 rounded-xl p-3 border border-gray-700/50">
+                    <div className="flex items-start gap-2">
+                      <Paintbrush size={16} className="text-[#06C755] mt-0.5 shrink-0" />
+                      <p className="text-[10px] text-gray-400 leading-relaxed">
+                        透過しすぎた部分をドラッグして塗り戻せます
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* バケツ設定 */}
+              {activeTool === 'bucket' && (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-gray-400">塗り色</label>
+                      <div 
+                        className="w-6 h-6 rounded border-2 border-gray-600"
+                        style={{ backgroundColor: brushColor }}
+                        title={`現在の色: ${brushColor}`}
+                      />
+                    </div>
+                    {/* よく使う色 */}
+                    <div className="grid grid-cols-6 gap-1">
+                      {frequentColors.map((color) => (
+                        <button
+                          key={`freq-bucket-${color}`}
+                          onClick={() => setBrushColor(color)}
+                          className={`w-full aspect-square rounded border transition-all ${
+                            brushColor === color 
+                              ? 'border-[#06C755] ring-1 ring-[#06C755]/50 scale-110 z-10' 
+                              : 'border-gray-700 hover:border-gray-500'
+                          }`}
+                          style={{ backgroundColor: color }}
+                          title={color}
+                        />
+                      ))}
+                    </div>
+                    {/* 256色パレット */}
+                    <div className="max-h-32 overflow-y-auto rounded-lg bg-gray-900/50 p-1 border border-gray-800">
+                      <div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(16, 1fr)' }}>
+                        {colorPalette.map((color, idx) => (
+                          <button
+                            key={`bucket-palette-${idx}`}
+                            onClick={() => setBrushColor(color)}
+                            className={`w-3 h-3 transition-all ${
+                              brushColor === color 
+                                ? 'ring-1 ring-[#06C755] ring-offset-1 ring-offset-gray-900 z-10' 
+                                : 'hover:scale-125'
+                            }`}
+                            style={{ backgroundColor: color }}
+                            title={color}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-gray-600 text-center">スクロールで256色から選択</p>
+                  </div>
+                  <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/80 rounded-xl p-3 border border-gray-700/50">
+                    <div className="flex items-start gap-2">
+                      <PaintBucket size={16} className="text-[#06C755] mt-0.5 shrink-0" />
+                      <p className="text-[10px] text-gray-400 leading-relaxed">
+                        クリックで同じ色の範囲を塗りつぶし
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* スポイト設定 */}
+              {activeTool === 'eyedropper' && (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-gray-400">現在の色</label>
+                      <div 
+                        className="w-8 h-8 rounded-lg border-2 border-gray-600 shadow-lg"
+                        style={{ backgroundColor: brushColor }}
+                        title={`現在の色: ${brushColor}`}
+                      />
+                    </div>
+                    <div className="text-center">
+                      <span className="text-sm font-mono text-white bg-gray-800 px-3 py-1 rounded">{brushColor}</span>
+                    </div>
+                  </div>
+                  <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/80 rounded-xl p-3 border border-gray-700/50">
+                    <div className="flex items-start gap-2">
+                      <Pipette size={16} className="text-[#06C755] mt-0.5 shrink-0" />
+                      <p className="text-[10px] text-gray-400 leading-relaxed">
+                        画像をクリックして色を取得。取得した色は塗りブラシやバケツで使用できます。
+                      </p>
+                    </div>
+                  </div>
+                </>
               )}
 
               {/* アクションボタン */}
@@ -700,7 +1194,7 @@ const EditorModal: React.FC<EditorModalProps> = ({ isOpen, onClose, imageSrc, on
               {/* ヒント */}
               <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-800">
                 <p className="text-[10px] text-gray-500 leading-relaxed">
-                  💡 <span className="text-gray-400">ヒント:</span> Spaceキーを押している間、一時的に移動ツールに切り替わります。
+                  💡 <span className="text-gray-400">ヒント:</span> Spaceキーを押している間、一時的に移動ツールに切り替わります。キー1〜7でツールを切り替えられます。
                 </p>
               </div>
             </div>
